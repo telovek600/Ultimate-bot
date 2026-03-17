@@ -1,10 +1,10 @@
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from typing import Optional
-
+ 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiogram import Bot
-
+ 
 from config import TIMEZONE, REMINDER_HOURS_BEFORE
 from database import (
     get_future_unreminded_bookings,
@@ -16,18 +16,18 @@ from database import (
     get_clients_not_visited_since,
     get_setting,
 )
-
+ 
 scheduler = AsyncIOScheduler(timezone=TIMEZONE)
 _bot: Optional[Bot] = None
-
-
+ 
+ 
 def set_bot(bot: Bot):
     global _bot
     _bot = bot
-
-
+ 
+ 
 # ── Напоминание о записи ───────────────────────────────────
-
+ 
 async def send_booking_reminder(booking_id, user_id, barber,
                                 service, booking_date, booking_time):
     if not _bot:
@@ -46,8 +46,8 @@ async def send_booking_reminder(booking_id, user_id, barber,
         mark_booking_reminded(booking_id)
     except Exception:
         pass
-
-
+ 
+ 
 def schedule_booking_reminder(booking_id, user_id, barber,
                                service, booking_date, booking_time, appointment_at):
     appointment_dt = datetime.fromisoformat(appointment_at)
@@ -64,20 +64,20 @@ def schedule_booking_reminder(booking_id, user_id, barber,
         kwargs=dict(booking_id=booking_id, user_id=user_id, barber=barber,
                     service=service, booking_date=booking_date, booking_time=booking_time),
     )
-
-
+ 
+ 
 # ── Архивация просроченных записей (каждые 5 мин) ─────────
-
+ 
 async def job_archive_expired():
     archive_expired_bookings()
-
-
+ 
+ 
 # ── Запланированные рассылки (каждую минуту) ──────────────
-
+ 
 async def job_send_pending_broadcasts():
     if not _bot:
         return
-    now_iso = datetime.now().isoformat(timespec="seconds")
+    now_iso = datetime.now(ZoneInfo(TIMEZONE)).strftime("%Y-%m-%dT%H:%M:%S")
     broadcasts = get_pending_broadcasts(now_iso)
     for bc in broadcasts:
         clients = get_all_clients()
@@ -89,10 +89,10 @@ async def job_send_pending_broadcasts():
             except Exception:
                 failed += 1
         mark_broadcast_sent(bc["id"], sent, failed)
-
-
+ 
+ 
 # ── Рассылка по расписанию (еженедельно/ежедневно) ────────
-
+ 
 async def job_scheduled_broadcast():
     """
     Читает настройки из БД и отправляет рассылку
@@ -102,22 +102,22 @@ async def job_scheduled_broadcast():
         return
     if get_setting("broadcast_schedule_enabled") != "1":
         return
-
+ 
     text = get_setting("broadcast_schedule_text") or ""
     if not text:
         return
-
+ 
     schedule_day  = get_setting("broadcast_schedule_day")   # "0"-"6" или "every"
     schedule_time = get_setting("broadcast_schedule_time")  # "HH:MM"
-
+ 
     now = datetime.now(ZoneInfo(TIMEZONE))
     now_time = now.strftime("%H:%M")
-
+ 
     if schedule_day != "every" and str(now.weekday()) != schedule_day:
         return
     if now_time != schedule_time:
         return
-
+ 
     clients = get_all_clients()
     sent, failed = 0, 0
     for c in clients:
@@ -126,14 +126,14 @@ async def job_scheduled_broadcast():
             sent += 1
         except Exception:
             failed += 1
-
+ 
     from database import create_broadcast, mark_broadcast_sent
     bc_id = create_broadcast(text)
     mark_broadcast_sent(bc_id, sent, failed)
-
-
+ 
+ 
 # ── Win-back: клиенты, не приходившие 30 дней ─────────────
-
+ 
 async def job_winback():
     """Раз в день отправляет сообщение клиентам, которые не были 30 дней."""
     if not _bot:
@@ -149,10 +149,10 @@ async def job_winback():
             )
         except Exception:
             pass
-
-
+ 
+ 
 # ── Загрузка напоминаний + регистрация джобов ─────────────
-
+ 
 def load_reminders_from_db():
     now_iso = datetime.now().isoformat(timespec="seconds")
     for row in get_future_unreminded_bookings(now_iso):
@@ -165,19 +165,19 @@ def load_reminders_from_db():
             booking_time=row["booking_time"],
             appointment_at=row["appointment_at"],
         )
-
+ 
     if not scheduler.get_job("archive_expired"):
         scheduler.add_job(job_archive_expired, "interval", minutes=5,
                           id="archive_expired", replace_existing=True)
-
+ 
     if not scheduler.get_job("pending_broadcasts"):
         scheduler.add_job(job_send_pending_broadcasts, "interval", minutes=1,
                           id="pending_broadcasts", replace_existing=True)
-
+ 
     if not scheduler.get_job("scheduled_broadcast"):
         scheduler.add_job(job_scheduled_broadcast, "interval", minutes=1,
                           id="scheduled_broadcast", replace_existing=True)
-
+ 
     if not scheduler.get_job("winback"):
         scheduler.add_job(job_winback, "cron", hour=10, minute=0,
                           id="winback", replace_existing=True)
