@@ -695,10 +695,14 @@ async def _finish_booking(message: Message, state: FSMContext, bonuses_used: int
     # Уведомление админу
     for admin_id in ADMIN_IDS:
         try:
+            tg_username = message.from_user.username
+            tg_link = f"@{tg_username}" if tg_username else "не указан"
             await message.bot.send_message(
                 admin_id,
                 f"🆕 Новая запись!\n\n"
-                f"👤 {client_name} | 📞 {phone}\n"
+                f"👤 {client_name}\n"
+                f"📞 {phone}\n"
+                f"🔗 Telegram: {tg_link}\n"
                 f"💈 {barber} | ✂️ {service}\n"
                 f"📅 {booking_date} в {booking_time}\n"
                 f"💵 {service_price} ₽"
