@@ -8,7 +8,7 @@ CONTACTS = "+7 (999) 123-45-67"
 
 REMINDER_HOURS_BEFORE = 2
 TIME_SLOT_STEP_MINUTES = 30
-BOOKING_DAYS_AHEAD = 7
+BOOKING_DAYS_AHEAD = 30
 
 # ── Google Sheets ──────────────────────────────────────────
 # Создай сервисный аккаунт в Google Cloud Console,
