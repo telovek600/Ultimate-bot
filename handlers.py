@@ -1,11 +1,11 @@
 import re
 from datetime import datetime, timedelta
-
+ 
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
-
+ 
 from config import (
     ADMIN_IDS, BARBERSHOP_NAME, ADDRESS, CONTACTS,
     SERVICES, BOOKING_DAYS_AHEAD, TIME_SLOT_STEP_MINUTES,
@@ -34,42 +34,42 @@ from keyboards import (
 )
 from scheduler_jobs import schedule_booking_reminder
 from states import BookingState, AdminState, BarberAdminState
-
+ 
 router = Router()
-
-
+ 
+ 
 # ── Utils ──────────────────────────────────────────────────
-
+ 
 def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
-
-
+ 
+ 
 def format_date_label(d: datetime) -> str:
     days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
     return f"{d.strftime('%d.%m.%Y')} ({days[d.weekday()]})"
-
-
+ 
+ 
 def parse_date_label(label: str) -> str:
     return label.split(" ")[0]
-
-
+ 
+ 
 def to_iso_date(date_str: str) -> str:
     return datetime.strptime(date_str, "%d.%m.%Y").strftime("%Y-%m-%d")
-
-
+ 
+ 
 def time_to_minutes(v: str) -> int:
     h, m = map(int, v.split(":"))
     return h * 60 + m
-
-
+ 
+ 
 def minutes_to_time(v: int) -> str:
     return f"{v // 60:02d}:{v % 60:02d}"
-
-
+ 
+ 
 def has_overlap(s1, d1, s2, d2) -> bool:
     return max(s1, s2) < min(s1 + d1, s2 + d2)
-
-
+ 
+ 
 def generate_available_dates(barber_name: str) -> list:
     barber = get_barber(barber_name)
     if not barber:
@@ -85,8 +85,8 @@ def generate_available_dates(barber_name: str) -> list:
         if day.weekday() in workdays:
             result.append(format_date_label(day))
     return result
-
-
+ 
+ 
 def generate_free_times(barber_name: str, booking_date: str, duration: int) -> list:
     barber = get_barber(barber_name)
     if not barber:
@@ -95,22 +95,22 @@ def generate_free_times(barber_name: str, booking_date: str, duration: int) -> l
     end_time   = barber["end_time"]   or "20:00"
     work_start = time_to_minutes(start_time)
     work_end   = time_to_minutes(end_time)
-
+ 
     now = datetime.now()
     if booking_date == now.strftime("%Y-%m-%d"):
         work_start = max(work_start, now.hour * 60 + now.minute)
-
+ 
     existing = get_bookings_for_barber_date(barber_name, booking_date)
     busy_slots = [(time_to_minutes(r["booking_time"]), r["duration_min"]) for r in existing]
-
+ 
     free, cur = [], work_start
     while cur + duration <= work_end:
         if not any(has_overlap(cur, duration, s, d) for s, d in busy_slots):
             free.append(minutes_to_time(cur))
         cur += TIME_SLOT_STEP_MINUTES
     return free
-
-
+ 
+ 
 def calc_bonuses_earned(price: int, bonuses_used: int) -> int:
     """Сколько бонусов начислить за запись."""
     cashback_on = get_setting("loyalty_cashback") == "1"
@@ -121,16 +121,16 @@ def calc_bonuses_earned(price: int, bonuses_used: int) -> int:
     if visits_on:
         earned += VISITS_BONUS_AMOUNT
     return earned
-
-
+ 
+ 
 def calc_max_spend(price: int, balance: int) -> int:
     """Сколько бонусов максимум можно потратить."""
     max_by_pct = int(price * MAX_BONUS_SPEND_PCT / 100)
     return min(balance, max_by_pct)
-
-
+ 
+ 
 # ── /start ─────────────────────────────────────────────────
-
+ 
 @router.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
@@ -138,10 +138,10 @@ async def cmd_start(message: Message, state: FSMContext):
         f"Добро пожаловать в {BARBERSHOP_NAME} 💎",
         reply_markup=main_keyboard(is_admin(message.from_user.id)),
     )
-
-
+ 
+ 
 # ── Специалисты ────────────────────────────────────────────
-
+ 
 @router.message(F.text == "👨‍🔧 Специалисты")
 async def show_specialists(message: Message):
     barbers = get_barbers()
@@ -149,8 +149,8 @@ async def show_specialists(message: Message):
         await message.answer("Список барберов пуст")
         return
     await message.answer("Наши специалисты:", reply_markup=specialists_keyboard([b["name"] for b in barbers]))
-
-
+ 
+ 
 @router.callback_query(F.data.startswith("show_barber:"))
 async def show_barber_card(callback: CallbackQuery):
     barber = get_barber(callback.data.split(":")[1])
@@ -166,10 +166,10 @@ async def show_barber_card(callback: CallbackQuery):
     )
     await callback.message.answer_photo(photo=barber["photo"], caption=text, parse_mode="HTML")
     await callback.answer()
-
-
+ 
+ 
 # ── Услуги / Адрес ─────────────────────────────────────────
-
+ 
 @router.message(F.text == "💈 Услуги и цены")
 async def show_services_info(message: Message):
     text = "💈 <b>Услуги и цены:</b>\n\n"
@@ -177,18 +177,18 @@ async def show_services_info(message: Message):
         text += f"• {name} — {info['price']} ₽ ({info['duration']} мин)\n"
     await message.answer(text, parse_mode="HTML",
                          reply_markup=main_keyboard(is_admin(message.from_user.id)))
-
-
+ 
+ 
 @router.message(F.text == "📍 Адрес")
 async def show_address(message: Message):
     await message.answer(
         f"📍 Адрес: {ADDRESS}\n📞 Контакты: {CONTACTS}",
         reply_markup=main_keyboard(is_admin(message.from_user.id)),
     )
-
-
+ 
+ 
 # ── Мои бонусы ─────────────────────────────────────────────
-
+ 
 @router.message(F.text == "🎁 Мои бонусы")
 async def show_my_bonuses(message: Message):
     uid = message.from_user.id
@@ -196,26 +196,26 @@ async def show_my_bonuses(message: Message):
     log = get_bonus_log(uid, 5)
     cashback_on = get_setting("loyalty_cashback") == "1"
     visits_on   = get_setting("loyalty_visits")   == "1"
-
+ 
     text = f"🎁 <b>Ваши бонусы: {balance} ₽</b>\n\n"
     if cashback_on:
         text += f"• Кэшбэк {CASHBACK_PERCENT}% от каждой записи\n"
     if visits_on:
         text += f"• +{VISITS_BONUS_AMOUNT} бонусов за каждый визит\n"
     text += f"• Тратить можно до {MAX_BONUS_SPEND_PCT}% от суммы записи\n\n"
-
+ 
     if log:
         text += "📋 <b>Последние операции:</b>\n"
         for entry in log:
             sign = "+" if entry["delta"] > 0 else ""
             text += f"  {sign}{entry['delta']} — {entry['reason']} ({entry['created_at'][:10]})\n"
-
+ 
     await message.answer(text, parse_mode="HTML",
                          reply_markup=main_keyboard(is_admin(uid)))
-
-
+ 
+ 
 # ── Отмена записи (клиент) ─────────────────────────────────
-
+ 
 @router.message(F.text == "❌ Отменить запись")
 async def show_my_bookings(message: Message):
     bookings = get_active_bookings_for_user(message.from_user.id)
@@ -225,8 +225,8 @@ async def show_my_bookings(message: Message):
         return
     await message.answer("Ваши активные записи. Нажмите для отмены:",
                          reply_markup=cancel_bookings_keyboard(bookings))
-
-
+ 
+ 
 @router.callback_query(F.data.startswith("cancel_booking:"))
 async def handle_cancel_booking(callback: CallbackQuery):
     action = callback.data.split(":")[1]
@@ -261,8 +261,8 @@ async def handle_cancel_booking(callback: CallbackQuery):
     )
     await callback.message.edit_text(text, reply_markup=confirm_cancel_keyboard(booking_id))
     await callback.answer()
-
-
+ 
+ 
 @router.callback_query(F.data.startswith("confirm_cancel:"))
 async def handle_confirm_cancel(callback: CallbackQuery):
     try:
@@ -278,14 +278,14 @@ async def handle_confirm_cancel(callback: CallbackQuery):
         await callback.message.edit_text("Запись уже была отменена.")
         await callback.answer()
         return
-
+ 
     cancel_booking(booking_id)
-
+ 
     # Возвращаем потраченные бонусы
     if booking["bonuses_used"] > 0:
         add_bonuses(booking["user_id"], booking["bonuses_used"],
                     booking_id, "Возврат при отмене записи")
-
+ 
     for admin_id in ADMIN_IDS:
         try:
             await callback.bot.send_message(
@@ -297,16 +297,16 @@ async def handle_confirm_cancel(callback: CallbackQuery):
             )
         except Exception:
             pass
-
+ 
     await callback.message.edit_text(
         f"✅ Запись отменена.\n💈 {booking['barber']} | ✂️ {booking['service']}\n"
         f"📅 {booking['booking_date']} в {booking['booking_time']}\n\nБудем рады видеть вас снова!"
     )
     await callback.answer("Запись отменена", show_alert=True)
-
-
+ 
+ 
 # ── Отмена записи (админ) ──────────────────────────────────
-
+ 
 @router.message(F.text == "🗑 Отменить запись (админ)")
 async def admin_show_all_bookings(message: Message):
     if not is_admin(message.from_user.id):
@@ -317,8 +317,8 @@ async def admin_show_all_bookings(message: Message):
         return
     await message.answer(f"Активные записи ({len(bookings)} шт.):",
                          reply_markup=admin_cancel_bookings_keyboard(bookings))
-
-
+ 
+ 
 @router.callback_query(F.data.startswith("admin_cancel:"))
 async def handle_admin_cancel(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
@@ -354,8 +354,8 @@ async def handle_admin_cancel(callback: CallbackQuery):
         reply_markup=admin_confirm_cancel_keyboard(booking_id),
     )
     await callback.answer()
-
-
+ 
+ 
 @router.callback_query(F.data.startswith("admin_confirm_cancel:"))
 async def handle_admin_confirm_cancel(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
@@ -388,10 +388,10 @@ async def handle_admin_confirm_cancel(callback: CallbackQuery):
     await callback.message.edit_text(
         f"✅ Запись #{booking_id} отменена.\n👤 {booking['client_name']} уведомлён.")
     await callback.answer("Запись отменена", show_alert=True)
-
-
+ 
+ 
 # ── Кнопка "Назад" ─────────────────────────────────────────
-
+ 
 @router.message(F.text == "⬅️ Назад")
 async def go_back(message: Message, state: FSMContext):
     cur = await state.get_state()
@@ -437,18 +437,18 @@ async def go_back(message: Message, state: FSMContext):
         await state.clear()
         await message.answer("Главное меню:",
                              reply_markup=main_keyboard(is_admin(message.from_user.id)))
-
-
+ 
+ 
 # ── Запись — FSM ───────────────────────────────────────────
-
+ 
 @router.message(F.text == "✂️ Записаться")
 async def start_booking(message: Message, state: FSMContext):
     await state.clear()
     uid = message.from_user.id
-
+ 
     # Проверяем клиента в БД — если уже записывался, пропускаем имя и телефон
     existing = get_client(uid)
-
+ 
     if existing and existing["client_name"] and existing["phone"] \
             and str(existing["client_name"]).strip() and str(existing["phone"]).strip():
         await state.update_data(
@@ -471,8 +471,8 @@ async def start_booking(message: Message, state: FSMContext):
         await state.update_data(from_existing_client=False)
         await message.answer("Как вас зовут?")
         await state.set_state(BookingState.name)
-
-
+ 
+ 
 @router.message(BookingState.name)
 async def get_name(message: Message, state: FSMContext):
     if message.text == "⬅️ Назад":
@@ -481,14 +481,14 @@ async def get_name(message: Message, state: FSMContext):
     await state.update_data(client_name=message.text)
     await message.answer("Введите номер телефона:", reply_markup=phone_keyboard())
     await state.set_state(BookingState.phone)
-
-
+ 
+ 
 @router.message(BookingState.phone, F.contact)
 async def get_phone_contact(message: Message, state: FSMContext):
     data = await state.get_data()
     phone = message.contact.phone_number
     await state.update_data(phone=phone)
-
+ 
     # Сохраняем клиента сразу — чтобы при следующей записи не спрашивать данные
     upsert_client(
         message.from_user.id,
@@ -497,12 +497,12 @@ async def get_phone_contact(message: Message, state: FSMContext):
         message.from_user.username,
         message.from_user.full_name,
     )
-
+ 
     barbers = get_barber_names()
     await message.answer("Выберите мастера:", reply_markup=barbers_keyboard(barbers))
     await state.set_state(BookingState.barber)
-
-
+ 
+ 
 @router.message(BookingState.phone, F.text)
 async def get_phone_text(message: Message, state: FSMContext):
     if message.text == "⬅️ Назад":
@@ -514,7 +514,7 @@ async def get_phone_text(message: Message, state: FSMContext):
         return
     data = await state.get_data()
     await state.update_data(phone=phone)
-
+ 
     # Сохраняем клиента сразу — чтобы при следующей записи не спрашивать данные
     upsert_client(
         message.from_user.id,
@@ -523,12 +523,12 @@ async def get_phone_text(message: Message, state: FSMContext):
         message.from_user.username,
         message.from_user.full_name,
     )
-
+ 
     barbers = get_barber_names()
     await message.answer("Выберите мастера:", reply_markup=barbers_keyboard(barbers))
     await state.set_state(BookingState.barber)
-
-
+ 
+ 
 @router.message(BookingState.barber)
 async def select_barber(message: Message, state: FSMContext):
     if message.text == "⬅️ Назад":
@@ -541,8 +541,8 @@ async def select_barber(message: Message, state: FSMContext):
     await state.update_data(barber=message.text)
     await message.answer("Выберите услугу:", reply_markup=services_keyboard(list(SERVICES.keys())))
     await state.set_state(BookingState.service)
-
-
+ 
+ 
 @router.message(BookingState.service)
 async def get_service(message: Message, state: FSMContext):
     if message.text == "⬅️ Назад":
@@ -556,8 +556,8 @@ async def get_service(message: Message, state: FSMContext):
     dates = generate_available_dates(data["barber"])
     await message.answer("Выберите дату:", reply_markup=dates_keyboard(dates))
     await state.set_state(BookingState.date)
-
-
+ 
+ 
 @router.message(BookingState.date)
 async def get_date(message: Message, state: FSMContext):
     if message.text == "⬅️ Назад":
@@ -578,8 +578,8 @@ async def get_date(message: Message, state: FSMContext):
     await state.update_data(date=booking_date, booking_date_iso=to_iso_date(booking_date))
     await message.answer("Выберите время:", reply_markup=times_keyboard(free_times))
     await state.set_state(BookingState.time)
-
-
+ 
+ 
 @router.message(BookingState.time)
 async def get_time(message: Message, state: FSMContext):
     if message.text == "⬅️ Назад":
@@ -592,17 +592,17 @@ async def get_time(message: Message, state: FSMContext):
         await message.answer("Выберите время кнопкой", reply_markup=times_keyboard(free_times))
         return
     await state.update_data(booking_time=message.text)
-
+ 
     # Предложить потратить бонусы если есть
     uid = message.from_user.id
     balance = get_bonus_balance(uid)
     price = SERVICES[data["service"]]["price"]
     max_spend = calc_max_spend(price, balance)
-
+ 
     cashback_on = get_setting("loyalty_cashback") == "1"
     visits_on   = get_setting("loyalty_visits")   == "1"
     loyalty_on  = cashback_on or visits_on
-
+ 
     if loyalty_on and balance > 0 and max_spend > 0:
         await message.answer(
             f"💰 У вас <b>{balance} бонусов</b>.\n"
@@ -615,15 +615,15 @@ async def get_time(message: Message, state: FSMContext):
         await state.set_state(BookingState.use_bonuses)
     else:
         await _finish_booking(message, state, bonuses_used=0)
-
-
+ 
+ 
 @router.message(BookingState.use_bonuses)
 async def handle_use_bonuses(message: Message, state: FSMContext):
     data = await state.get_data()
     price = SERVICES[data["service"]]["price"]
     balance = get_bonus_balance(message.from_user.id)
     max_spend = calc_max_spend(price, balance)
-
+ 
     if message.text.startswith("✅ Да"):
         await _finish_booking(message, state, bonuses_used=max_spend)
     elif message.text.startswith("❌ Нет"):
@@ -631,8 +631,8 @@ async def handle_use_bonuses(message: Message, state: FSMContext):
     else:
         await message.answer("Нажмите одну из кнопок.",
                              reply_markup=use_bonuses_keyboard(balance, max_spend))
-
-
+ 
+ 
 async def _finish_booking(message: Message, state: FSMContext, bonuses_used: int):
     data = await state.get_data()
     uid         = message.from_user.id
@@ -646,12 +646,12 @@ async def _finish_booking(message: Message, state: FSMContext, bonuses_used: int
     service_price   = SERVICES[service]["price"]
     duration        = SERVICES[service]["duration"]
     appointment_at  = f"{booking_date_iso}T{booking_time}:00"
-
+ 
     bonuses_earned = calc_bonuses_earned(service_price, bonuses_used)
     final_price    = service_price - bonuses_used
-
+ 
     upsert_client(uid, client_name, phone, message.from_user.username, message.from_user.full_name)
-
+ 
     booking_id = create_booking(
         user_id=uid, client_name=client_name, phone=phone,
         barber=barber, service=service, service_price=service_price,
@@ -659,26 +659,26 @@ async def _finish_booking(message: Message, state: FSMContext, bonuses_used: int
         booking_time=booking_time, appointment_at=appointment_at,
         bonuses_used=bonuses_used, bonuses_earned=bonuses_earned,
     )
-
+ 
     if bonuses_used > 0:
         spend_bonuses(uid, bonuses_used, booking_id)
     if bonuses_earned > 0:
         add_bonuses(uid, bonuses_earned, booking_id,
                     f"Кэшбэк за запись #{booking_id}")
-
+ 
     schedule_booking_reminder(
         booking_id=booking_id, user_id=uid, barber=barber,
         service=service, booking_date=booking_date_iso,
         booking_time=booking_time, appointment_at=appointment_at,
     )
-
+ 
     bonus_info = ""
     if bonuses_used > 0:
         bonus_info += f"🎁 Списано бонусов: {bonuses_used} ₽\n"
         bonus_info += f"💳 К оплате: {final_price} ₽\n"
     if bonuses_earned > 0:
         bonus_info += f"⭐ Начислено бонусов: +{bonuses_earned}\n"
-
+ 
     await message.answer(
         "✅ <b>Вы успешно записаны!</b>\n\n"
         f"👤 Имя: {client_name}\n"
@@ -693,7 +693,7 @@ async def _finish_booking(message: Message, state: FSMContext, bonuses_used: int
         parse_mode="HTML",
         reply_markup=main_keyboard(is_admin(uid)),
     )
-
+ 
     # Уведомление админу
     for admin_id in ADMIN_IDS:
         try:
@@ -712,12 +712,12 @@ async def _finish_booking(message: Message, state: FSMContext, bonuses_used: int
             )
         except Exception:
             pass
-
+ 
     await state.clear()
-
-
+ 
+ 
 # ── Главное меню ───────────────────────────────────────────
-
+ 
 @router.message(F.text == "🏠 В меню")
 async def go_to_menu(message: Message, state: FSMContext):
     await state.clear()
@@ -725,10 +725,10 @@ async def go_to_menu(message: Message, state: FSMContext):
         f"Добро пожаловать в {BARBERSHOP_NAME} 💎",
         reply_markup=main_keyboard(is_admin(message.from_user.id)),
     )
-
-
+ 
+ 
 # ── Админ-панель ───────────────────────────────────────────
-
+ 
 @router.message(F.text == "🛠 Админ-панель")
 @router.message(Command("admin"))
 async def open_admin_panel(message: Message, state: FSMContext):
@@ -738,8 +738,8 @@ async def open_admin_panel(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("🛠 <b>Админ-панель</b>\n\nВыберите действие:",
                          parse_mode="HTML", reply_markup=admin_keyboard())
-
-
+ 
+ 
 @router.message(F.text == "📅 Записи на сегодня")
 async def admin_today(message: Message):
     if not is_admin(message.from_user.id):
@@ -757,8 +757,8 @@ async def admin_today(message: Message):
             f"   📞 {b['phone']} | #{b['id']}\n\n"
         )
     await message.answer(text, parse_mode="HTML", reply_markup=admin_keyboard())
-
-
+ 
+ 
 @router.message(F.text == "📚 Последние записи")
 async def admin_recent(message: Message):
     if not is_admin(message.from_user.id):
@@ -776,8 +776,8 @@ async def admin_recent(message: Message):
             f"   💈 {b['barber']} | ✂️ {b['service']}\n\n"
         )
     await message.answer(text, parse_mode="HTML", reply_markup=admin_keyboard())
-
-
+ 
+ 
 @router.message(F.text == "📖 История записей")
 async def admin_history(message: Message):
     if not is_admin(message.from_user.id):
@@ -804,17 +804,17 @@ async def admin_history(message: Message):
     if len(text) > 4000:
         text = text[:4000] + "\n\n... (показаны последние 50)"
     await message.answer(text, parse_mode="HTML", reply_markup=admin_keyboard())
-
-
+ 
+ 
 # ── Статистика ─────────────────────────────────────────────
-
+ 
 @router.message(F.text == "📊 Статистика")
 async def admin_stats_menu(message: Message):
     if not is_admin(message.from_user.id):
         return
     await message.answer("📊 Выберите период:", reply_markup=stats_period_keyboard())
-
-
+ 
+ 
 @router.callback_query(F.data.startswith("stats:"))
 async def admin_stats(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
@@ -822,7 +822,7 @@ async def admin_stats(callback: CallbackQuery):
         return
     period = callback.data.split(":")[1]
     today  = datetime.now()
-
+ 
     if period == "today":
         date_from = date_to = today.strftime("%Y-%m-%d")
         label = "Сегодня"
@@ -838,9 +838,9 @@ async def admin_stats(callback: CallbackQuery):
         date_from = "2000-01-01"
         date_to   = today.strftime("%Y-%m-%d")
         label = "Все время"
-
+ 
     s = get_stats(date_from, date_to)
-
+ 
     text = (
         f"📊 <b>Статистика — {label}</b>\n\n"
         f"💵 Выручка: <b>{s['revenue']} ₽</b>\n"
@@ -861,13 +861,13 @@ async def admin_stats(callback: CallbackQuery):
         text += "✂️ <b>Топ услуг:</b>\n"
         for i, sv in enumerate(s["top_services"], 1):
             text += f"  {i}. {sv['service']} — {sv['cnt']} раз / {sv['total']} ₽\n"
-
+ 
     await callback.message.edit_text(text, parse_mode="HTML")
     await callback.answer()
-
-
+ 
+ 
 # ── Программа лояльности (админ) ──────────────────────────
-
+ 
 @router.message(F.text == "🎁 Программа лояльности")
 async def admin_loyalty_menu(message: Message):
     if not is_admin(message.from_user.id):
@@ -882,8 +882,8 @@ async def admin_loyalty_menu(message: Message):
     )
     await message.answer(text, parse_mode="HTML",
                          reply_markup=loyalty_admin_keyboard(cashback_on, visits_on))
-
-
+ 
+ 
 @router.callback_query(F.data.startswith("loyalty_toggle:"))
 async def toggle_loyalty(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
@@ -902,15 +902,15 @@ async def toggle_loyalty(callback: CallbackQuery):
         current = get_setting("loyalty_visits") == "1"
         set_setting("loyalty_visits", "0" if current else "1")
         await callback.answer("✅ Баллы за визит " + ("выключены" if current else "включены"))
-
+ 
     cashback_on = get_setting("loyalty_cashback") == "1"
     visits_on   = get_setting("loyalty_visits")   == "1"
     await callback.message.edit_reply_markup(
         reply_markup=loyalty_admin_keyboard(cashback_on, visits_on))
-
-
+ 
+ 
 # ── Рассылка ───────────────────────────────────────────────
-
+ 
 @router.message(F.text == "📢 Рассылка клиентам")
 async def admin_broadcast_menu(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
@@ -923,20 +923,20 @@ async def admin_broadcast_menu(message: Message, state: FSMContext):
         parse_mode="HTML",
         reply_markup=broadcast_keyboard(),
     )
-
-
+ 
+ 
 @router.callback_query(F.data.startswith("broadcast:"))
 async def broadcast_action(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         await callback.answer("Доступ запрещён", show_alert=True)
         return
     action = callback.data.split(":")[1]
-
+ 
     if action == "close":
         await callback.message.delete()
         await callback.answer()
         return
-
+ 
     if action == "now":
         await callback.message.edit_text(
             "✍️ Введите текст рассылки:\n\n(⬅️ Назад для отмены)")
@@ -944,7 +944,7 @@ async def broadcast_action(callback: CallbackQuery, state: FSMContext):
         await state.update_data(broadcast_type="now")
         await callback.answer()
         return
-
+ 
     if action == "schedule":
         await callback.message.edit_text(
             "✍️ Введите текст рассылки:\n\n(⬅️ Назад для отмены)")
@@ -952,7 +952,7 @@ async def broadcast_action(callback: CallbackQuery, state: FSMContext):
         await state.update_data(broadcast_type="schedule")
         await callback.answer()
         return
-
+ 
     if action == "history":
         history = get_broadcast_history(10)
         if not history:
@@ -974,7 +974,7 @@ async def broadcast_action(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text(text, parse_mode="HTML")
         await callback.answer()
         return
-
+ 
     if action == "pending":
         broadcasts = get_scheduled_broadcasts()
         if not broadcasts:
@@ -987,8 +987,8 @@ async def broadcast_action(callback: CallbackQuery, state: FSMContext):
         )
         await callback.answer()
         return
-
-
+ 
+ 
 @router.message(AdminState.broadcast_text)
 async def broadcast_get_text(message: Message, state: FSMContext):
     if message.text == "⬅️ Назад":
@@ -997,7 +997,7 @@ async def broadcast_get_text(message: Message, state: FSMContext):
         return
     data = await state.get_data()
     await state.update_data(broadcast_text=message.text)
-
+ 
     if data.get("broadcast_type") == "schedule":
         await message.answer(
             "🕐 Введите дату и время отправки в формате:\n"
@@ -1014,8 +1014,8 @@ async def broadcast_get_text(message: Message, state: FSMContext):
             reply_markup=broadcast_confirm_keyboard(),
         )
         await state.set_state(AdminState.broadcast_confirm)
-
-
+ 
+ 
 @router.message(AdminState.broadcast_schedule)
 async def broadcast_get_schedule(message: Message, state: FSMContext):
     try:
@@ -1023,22 +1023,26 @@ async def broadcast_get_schedule(message: Message, state: FSMContext):
     except ValueError:
         await message.answer("Неверный формат. Введите как: 25.12.2025 10:00")
         return
-    if scheduled_dt <= datetime.now():
-        await message.answer("❌ Дата и время должны быть в будущем. Введите снова:")
+    from zoneinfo import ZoneInfo
+    from config import TIMEZONE
+    now_msk = datetime.now(ZoneInfo(TIMEZONE)).replace(tzinfo=None)
+    if scheduled_dt <= now_msk:
+        await message.answer("❌ Дата и время должны быть в будущем по МСК. Введите снова:")
         return
     data = await state.get_data()
-    scheduled_iso = scheduled_dt.isoformat(timespec="seconds")
+    # Сохраняем как МСК — job_send_pending_broadcasts тоже сравнивает по МСК
+    scheduled_iso = scheduled_dt.strftime("%Y-%m-%dT%H:%M:%S")
     bc_id = create_broadcast(data["broadcast_text"], scheduled_at=scheduled_iso)
     await state.clear()
     preview = (data["broadcast_text"] or "")[:80]
     await message.answer(
-        f"✅ Рассылка запланирована на <b>{message.text}</b>\n\n"
+        f"✅ Рассылка запланирована на <b>{message.text}</b> (МСК)\n\n"
         f"Текст: {preview}{'...' if len(data['broadcast_text']) > 80 else ''}",
         parse_mode="HTML",
         reply_markup=broadcast_cancel_confirm_keyboard(bc_id),
     )
-
-
+ 
+ 
 @router.callback_query(F.data.startswith("broadcast_confirm:"))
 async def broadcast_confirm(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
@@ -1050,7 +1054,7 @@ async def broadcast_confirm(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text("❌ Рассылка отменена.")
         await callback.answer()
         return
-
+ 
     data = await state.get_data()
     text = data.get("broadcast_text", "")
     clients = get_all_clients()
@@ -1068,10 +1072,10 @@ async def broadcast_confirm(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         f"✅ Рассылка завершена.\nОтправлено: {sent} | Ошибок: {failed}")
     await callback.answer()
-
-
+ 
+ 
 # ── Отмена запланированной рассылки ───────────────────────
-
+ 
 @router.callback_query(F.data.startswith("broadcast_cancel_view:"))
 async def broadcast_cancel_view(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
@@ -1089,17 +1093,17 @@ async def broadcast_cancel_view(callback: CallbackQuery):
         return
     dt = (bc["scheduled_at"] or "")[:16].replace("T", " ")
     await callback.message.edit_text(
-        f"🕐 Рассылка запланирована на <b>{dt}</b>\n\n"
+        f"🕐 Рассылка запланирована на <b>{dt}</b> (МСК)\n\n"
         f"Текст:\n{bc['text']}\n\n"
         "Отменить эту рассылку?",
         parse_mode="HTML",
         reply_markup=broadcast_cancel_confirm_keyboard(bc_id),
     )
     await callback.answer()
-
-
+ 
+ 
 @router.callback_query(F.data.startswith("broadcast_cancel_confirm:"))
-async def broadcast_cancel_confirm(callback: CallbackQuery):
+async def broadcast_cancel_confirm_handler(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer("Доступ запрещён", show_alert=True)
         return
@@ -1111,8 +1115,8 @@ async def broadcast_cancel_confirm(callback: CallbackQuery):
     cancel_broadcast(bc_id)
     await callback.message.edit_text("🚫 Рассылка отменена.")
     await callback.answer("Рассылка отменена", show_alert=True)
-
-
+ 
+ 
 @router.callback_query(F.data == "broadcast_cancel_back")
 async def broadcast_cancel_back(callback: CallbackQuery):
     broadcasts = get_scheduled_broadcasts()
@@ -1125,10 +1129,10 @@ async def broadcast_cancel_back(callback: CallbackQuery):
             reply_markup=scheduled_broadcasts_keyboard(broadcasts),
         )
     await callback.answer()
-
-
+ 
+ 
 # ── Google Sheets ──────────────────────────────────────────
-
+ 
 @router.message(F.text == "📤 Выгрузить в Google Sheets")
 async def export_to_sheets(message: Message):
     if not is_admin(message.from_user.id):
@@ -1152,10 +1156,10 @@ async def export_to_sheets(message: Message):
             parse_mode="HTML",
             reply_markup=admin_keyboard(),
         )
-
-
+ 
+ 
 # ── Управление барберами ───────────────────────────────────
-
+ 
 @router.message(F.text == "👨‍🔧 Управление барберами")
 async def admin_barbers_menu(message: Message):
     if not is_admin(message.from_user.id):
@@ -1165,8 +1169,8 @@ async def admin_barbers_menu(message: Message):
     text += "\n".join(f"{b['id']}. {b['name']}" for b in barbers) if barbers else "Список пуст.\n"
     text += "\n\n/add_barber — добавить\n/delete_barber ID — удалить"
     await message.answer(text, parse_mode="HTML", reply_markup=admin_keyboard())
-
-
+ 
+ 
 @router.message(Command("delete_barber"))
 async def delete_barber_cmd(message: Message):
     if not is_admin(message.from_user.id):
@@ -1180,16 +1184,16 @@ async def delete_barber_cmd(message: Message):
         await message.answer("✅ Барбер удалён", reply_markup=admin_keyboard())
     except ValueError:
         await message.answer("ID должен быть числом")
-
-
+ 
+ 
 @router.message(Command("add_barber"))
 async def add_barber_start(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     await message.answer("Добавление барбера.\n\nВведите имя:")
     await state.set_state(BarberAdminState.name)
-
-
+ 
+ 
 @router.message(BarberAdminState.name)
 async def barber_name(message: Message, state: FSMContext):
     if message.text == "⬅️ Назад":
@@ -1199,8 +1203,8 @@ async def barber_name(message: Message, state: FSMContext):
     await state.update_data(name=message.text)
     await message.answer("Введите стаж (например: 5 лет):")
     await state.set_state(BarberAdminState.experience)
-
-
+ 
+ 
 @router.message(BarberAdminState.experience)
 async def barber_experience(message: Message, state: FSMContext):
     if message.text == "⬅️ Назад":
@@ -1210,8 +1214,8 @@ async def barber_experience(message: Message, state: FSMContext):
     await state.update_data(experience=message.text)
     await message.answer("Введите специализацию:")
     await state.set_state(BarberAdminState.specialization)
-
-
+ 
+ 
 @router.message(BarberAdminState.specialization)
 async def barber_specialization(message: Message, state: FSMContext):
     if message.text == "⬅️ Назад":
@@ -1221,8 +1225,8 @@ async def barber_specialization(message: Message, state: FSMContext):
     await state.update_data(specialization=message.text)
     await message.answer("Введите сильные стороны:")
     await state.set_state(BarberAdminState.strong_sides)
-
-
+ 
+ 
 @router.message(BarberAdminState.strong_sides)
 async def barber_strong_sides(message: Message, state: FSMContext):
     if message.text == "⬅️ Назад":
@@ -1232,8 +1236,8 @@ async def barber_strong_sides(message: Message, state: FSMContext):
     await state.update_data(strong_sides=message.text)
     await message.answer("Введите описание:")
     await state.set_state(BarberAdminState.description)
-
-
+ 
+ 
 @router.message(BarberAdminState.description)
 async def barber_description(message: Message, state: FSMContext):
     if message.text == "⬅️ Назад":
@@ -1243,8 +1247,8 @@ async def barber_description(message: Message, state: FSMContext):
     await state.update_data(description=message.text)
     await message.answer("Отправьте фото или введите file_id:")
     await state.set_state(BarberAdminState.photo)
-
-
+ 
+ 
 @router.message(BarberAdminState.photo)
 async def barber_photo(message: Message, state: FSMContext):
     if message.text == "⬅️ Назад":
@@ -1260,10 +1264,11 @@ async def barber_photo(message: Message, state: FSMContext):
                data["strong_sides"], data["description"], photo_id)
     await state.clear()
     await message.answer(f"✅ Барбер {data['name']} добавлен!", reply_markup=admin_keyboard())
-
-
+ 
+ 
 # ── Debug ──────────────────────────────────────────────────
-
+ 
 @router.message()
 async def debug_message(message: Message):
     print("DEBUG:", message.text)
+ 
