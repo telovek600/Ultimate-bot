@@ -13,6 +13,7 @@ Google Sheets интеграция.
 """
 
 import gspread
+import os, json
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 
@@ -29,7 +30,15 @@ _gc = None
 def _get_client():
     global _gc
     if _gc is None:
-        creds = Credentials.from_service_account_file(GOOGLE_CREDENTIALS_FILE, scopes=SCOPES)
+        creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+        if creds_json:
+            creds = Credentials.from_service_account_info(
+                json.loads(creds_json), scopes=SCOPES
+            )
+        else:
+            creds = Credentials.from_service_account_file(
+                GOOGLE_CREDENTIALS_FILE, scopes=SCOPES
+            )
         _gc = gspread.authorize(creds)
     return _gc
 
